@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, UploadFile
+from fastapi import FastAPI, Request, Form, UploadFile, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +9,8 @@ import os
 import shutil
 import tempfile
 import uvicorn
+import asyncio
+from typing import List
 
 from pathlib import Path
 
@@ -22,6 +24,27 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "supersecret123")
 SESSIONS = set()
 HASH_FILE = "hashes.json"
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_progress(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 # === Helper functions ===
 def save_hash(entry):
@@ -212,6 +235,239 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
     except Exception as e:
         print(f"Remote upload error: {e}")
 
+    return RedirectResponse("/dashboard", status_code=302)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+async def upload_single_remote_file(file_url: str, user_hash: str, index: int, total: int):
+    """Upload a single remote file and send progress updates"""
+    try:
+        await manager.send_progress({
+            "type": "progress",
+            "index": index,
+            "total": total,
+            "url": file_url,
+            "status": "starting",
+            "message": f"Starting upload {index + 1}/{total}"
+        })
+
+        # Get VikingFile server
+        try:
+            server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10)
+            server_resp.raise_for_status()
+            server_url = server_resp.json()["server"]
+        except requests.exceptions.RequestException as e:
+            await manager.send_progress({
+                "type": "progress",
+                "index": index,
+                "total": total,
+                "url": file_url,
+                "status": "error",
+                "message": f"Failed to get server: {str(e)}"
+            })
+            return False
+
+        # Extract filename from URL
+        filename = file_url.split("/")[-1].split("?")[0] or f"remote_file_{index + 1}"
+        if not filename or filename == "":
+            filename = f"remote_file_{index + 1}"
+
+        await manager.send_progress({
+            "type": "progress",
+            "index": index,
+            "total": total,
+            "url": file_url,
+            "status": "uploading",
+            "message": f"Uploading {filename}..."
+        })
+
+        # Use VikingFile's remote upload API
+        upload_data = {
+            "link": file_url,
+            "user": user_hash,
+            "name": filename
+        }
+
+        # Try remote upload with retries
+        for attempt in range(3):
+            try:
+                upload_response = requests.post(
+                    server_url, 
+                    data=upload_data, 
+                    timeout=(10, 300)
+                )
+                upload_response.raise_for_status()
+                
+                if upload_response.status_code == 200:
+                    result = upload_response.json()
+                    
+                    # Check if the response contains an error
+                    if "error" in result and result["error"] != "success":
+                        await manager.send_progress({
+                            "type": "progress",
+                            "index": index,
+                            "total": total,
+                            "url": file_url,
+                            "status": "error",
+                            "message": f"API error: {result.get('error', 'Unknown error')}"
+                        })
+                        return False
+                    
+                    # Save successful upload
+                    if "hash" in result and "url" in result:
+                        save_hash(result)
+                        await manager.send_progress({
+                            "type": "progress",
+                            "index": index,
+                            "total": total,
+                            "url": file_url,
+                            "status": "completed",
+                            "message": f"✅ {result.get('name', filename)} uploaded successfully",
+                            "result": result
+                        })
+                        return True
+                    else:
+                        await manager.send_progress({
+                            "type": "progress",
+                            "index": index,
+                            "total": total,
+                            "url": file_url,
+                            "status": "error",
+                            "message": f"Unexpected response format"
+                        })
+                        return False
+                        
+                else:
+                    if attempt < 2:
+                        await manager.send_progress({
+                            "type": "progress",
+                            "index": index,
+                            "total": total,
+                            "url": file_url,
+                            "status": "retrying",
+                            "message": f"Retry {attempt + 1}/3..."
+                        })
+                        continue
+                    else:
+                        await manager.send_progress({
+                            "type": "progress",
+                            "index": index,
+                            "total": total,
+                            "url": file_url,
+                            "status": "error",
+                            "message": f"Upload failed with status: {upload_response.status_code}"
+                        })
+                        return False
+                    
+            except requests.exceptions.Timeout as e:
+                if attempt < 2:
+                    await manager.send_progress({
+                        "type": "progress",
+                        "index": index,
+                        "total": total,
+                        "url": file_url,
+                        "status": "retrying",
+                        "message": f"Timeout, retry {attempt + 1}/3..."
+                    })
+                    continue
+                else:
+                    await manager.send_progress({
+                        "type": "progress",
+                        "index": index,
+                        "total": total,
+                        "url": file_url,
+                        "status": "error",
+                        "message": f"Upload timed out after retries"
+                    })
+                    return False
+            except requests.exceptions.RequestException as e:
+                if attempt < 2:
+                    await manager.send_progress({
+                        "type": "progress",
+                        "index": index,
+                        "total": total,
+                        "url": file_url,
+                        "status": "retrying",
+                        "message": f"Network error, retry {attempt + 1}/3..."
+                    })
+                    continue
+                else:
+                    await manager.send_progress({
+                        "type": "progress",
+                        "index": index,
+                        "total": total,
+                        "url": file_url,
+                        "status": "error",
+                        "message": f"Network error: {str(e)}"
+                    })
+                    return False
+
+    except Exception as e:
+        await manager.send_progress({
+            "type": "progress",
+            "index": index,
+            "total": total,
+            "url": file_url,
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}"
+        })
+        return False
+
+@app.post("/upload-bulk-remote", response_class=HTMLResponse)
+async def upload_bulk_remote_files(
+    request: Request, 
+    background_tasks: BackgroundTasks,
+    file_urls: str = Form(...), 
+    user_hash: str = Form(...)
+):
+    auth = check_auth(request)
+    if isinstance(auth, RedirectResponse):
+        return auth
+
+    # Parse URLs (split by newlines or commas)
+    urls = []
+    for line in file_urls.strip().split('\n'):
+        line = line.strip()
+        if line:
+            # Also split by comma in case multiple URLs are on same line
+            for url in line.split(','):
+                url = url.strip()
+                if url.startswith(('http://', 'https://')):
+                    urls.append(url)
+
+    if not urls:
+        return RedirectResponse("/dashboard", status_code=302)
+
+    # Start bulk upload in background
+    async def bulk_upload_task():
+        await manager.send_progress({
+            "type": "bulk_start",
+            "total": len(urls),
+            "message": f"Starting bulk upload of {len(urls)} files..."
+        })
+        
+        successful = 0
+        for i, url in enumerate(urls):
+            result = await upload_single_remote_file(url, user_hash, i, len(urls))
+            if result:
+                successful += 1
+        
+        await manager.send_progress({
+            "type": "bulk_complete",
+            "total": len(urls),
+            "successful": successful,
+            "failed": len(urls) - successful,
+            "message": f"Bulk upload complete: {successful}/{len(urls)} successful"
+        })
+
+    background_tasks.add_task(bulk_upload_task)
     return RedirectResponse("/dashboard", status_code=302)
 
 # === Entrypoint ===

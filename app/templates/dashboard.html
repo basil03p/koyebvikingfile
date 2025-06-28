@@ -29,6 +29,24 @@
             </form>
         </div>
 
+        <div class="upload-section">
+            <h3>🚀 Bulk Remote Upload</h3>
+            <form action="/upload-bulk-remote" method="post">
+                <textarea name="file_urls" rows="6" placeholder="Enter multiple URLs (one per line or comma-separated):&#10;https://example.com/file1.zip&#10;https://example.com/file2.pdf&#10;https://example.com/file3.mp4" required style="width: 100%; padding: 1rem; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; background: rgba(255, 255, 255, 0.05); color: #ffffff; font-family: inherit; resize: vertical; min-height: 120px;"></textarea>
+                <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
+                <button type="submit">⚡ Bulk Upload</button>
+            </form>
+        </div>
+
+        <div id="progress-section" class="upload-section" style="display: none;">
+            <h3>📊 Upload Progress</h3>
+            <div id="overall-progress" class="progress-bar-container">
+                <div id="overall-progress-bar" class="progress-bar"></div>
+                <div id="overall-progress-text">0/0 files</div>
+            </div>
+            <div id="progress-list"></div>
+        </div>
+
         <div class="files-section">
             <h3>📋 Your Uploaded Files</h3>
             {% if hashes %}
@@ -47,5 +65,113 @@
             {% endif %}
         </div>
     </div>
+
+    <script>
+        let ws = null;
+        let uploads = {};
+        let bulkTotal = 0;
+        let bulkCompleted = 0;
+
+        function initWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleProgress(data);
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket disconnected');
+                setTimeout(initWebSocket, 3000); // Reconnect after 3 seconds
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function handleProgress(data) {
+            const progressSection = document.getElementById('progress-section');
+            const progressList = document.getElementById('progress-list');
+            const overallProgressBar = document.getElementById('overall-progress-bar');
+            const overallProgressText = document.getElementById('overall-progress-text');
+
+            if (data.type === 'bulk_start') {
+                bulkTotal = data.total;
+                bulkCompleted = 0;
+                uploads = {};
+                progressSection.style.display = 'block';
+                progressList.innerHTML = '';
+                updateOverallProgress();
+                progressSection.scrollIntoView({ behavior: 'smooth' });
+            } else if (data.type === 'progress') {
+                uploads[data.index] = data;
+                updateProgressItem(data);
+                
+                if (data.status === 'completed' || data.status === 'error') {
+                    bulkCompleted++;
+                    updateOverallProgress();
+                }
+            } else if (data.type === 'bulk_complete') {
+                setTimeout(() => {
+                    if (confirm('Bulk upload complete! Refresh page to see new files?')) {
+                        window.location.reload();
+                    }
+                }, 1000);
+            }
+        }
+
+        function updateProgressItem(data) {
+            const progressList = document.getElementById('progress-list');
+            let item = document.getElementById(`progress-${data.index}`);
+            
+            if (!item) {
+                item = document.createElement('div');
+                item.id = `progress-${data.index}`;
+                item.className = 'progress-item';
+                progressList.appendChild(item);
+            }
+            
+            const statusClass = data.status === 'completed' ? 'success' : 
+                              data.status === 'error' ? 'error' : 
+                              data.status === 'uploading' ? 'uploading' : 'pending';
+            
+            const statusIcon = data.status === 'completed' ? '✅' : 
+                             data.status === 'error' ? '❌' : 
+                             data.status === 'uploading' ? '⏳' : 
+                             data.status === 'retrying' ? '🔄' : '⏸️';
+            
+            const fileName = data.url.split('/').pop().split('?')[0] || 'Unknown file';
+            
+            item.innerHTML = `
+                <div class="progress-item-header">
+                    <span class="status-icon">${statusIcon}</span>
+                    <span class="file-name">${fileName}</span>
+                    <span class="progress-status ${statusClass}">${data.status}</span>
+                </div>
+                <div class="progress-message">${data.message}</div>
+                ${data.result ? `<div class="progress-result"><a href="${data.result.url}" target="_blank">View file</a></div>` : ''}
+            `;
+        }
+
+        function updateOverallProgress() {
+            const percentage = bulkTotal > 0 ? (bulkCompleted / bulkTotal) * 100 : 0;
+            const overallProgressBar = document.getElementById('overall-progress-bar');
+            const overallProgressText = document.getElementById('overall-progress-text');
+            
+            overallProgressBar.style.width = `${percentage}%`;
+            overallProgressText.textContent = `${bulkCompleted}/${bulkTotal} files`;
+        }
+
+        // Initialize WebSocket when page loads
+        document.addEventListener('DOMContentLoaded', initWebSocket);
+    </script>
 </body>
 </html>

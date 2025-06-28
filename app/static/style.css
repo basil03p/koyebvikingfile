@@ -208,3 +208,122 @@ ul li a:hover {
     margin-left: 0;
   }
 }
+
+/* Progress tracking styles */
+.progress-bar-container {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  height: 30px;
+  margin: 1rem 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar {
+  background: linear-gradient(135deg, #64ffda, #00bfa5);
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 10px;
+}
+
+#overall-progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  z-index: 1;
+}
+
+.progress-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 0.5rem 0;
+  transition: all 0.3s ease;
+}
+
+.progress-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.status-icon {
+  font-size: 1.2rem;
+}
+
+.file-name {
+  flex-grow: 1;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.progress-status {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.progress-status.success {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4CAF50;
+}
+
+.progress-status.error {
+  background: rgba(244, 67, 54, 0.2);
+  color: #f44336;
+}
+
+.progress-status.uploading {
+  background: rgba(100, 255, 218, 0.2);
+  color: #64ffda;
+}
+
+.progress-status.pending {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.progress-message {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  margin-left: 1.7rem;
+}
+
+.progress-result {
+  margin-left: 1.7rem;
+  margin-top: 0.5rem;
+}
+
+.progress-result a {
+  color: #64ffda;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.progress-result a:hover {
+  color: #ffffff;
+}
+
+textarea {
+  font-family: inherit !important;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #64ffda !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 15px rgba(100, 255, 218, 0.3) !important;
+}
+
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
