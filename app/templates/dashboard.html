@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><title>Dashboard</title></head>
+<body>
+<h2>Upload File to VikingFile</h2>
+<form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
+    <button type="submit">Upload</button>
+</form>
+<h3>Your uploaded files:</h3>
+<ul>
+{% for f in hashes %}
+    <li><a href="{{ f.url }}">{{ f.name }}</a> ({{ f.size }} bytes)</li>
+{% endfor %}
+</ul>
+</body>
+</html>
