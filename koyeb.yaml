@@ -1,0 +1,16 @@
+name: viking-uploader
+
+services:
+  - name: api
+    git:
+      repo: git@github.com:YOUR_USERNAME/viking-uploader-app.git
+      branch: main
+      build:
+        dockerfile: Dockerfile
+    ports:
+      - port: 8000
+        http_options:
+          enabled: true
+    env:
+      - name: APP_PASSWORD
+        value: "supersecret123"
