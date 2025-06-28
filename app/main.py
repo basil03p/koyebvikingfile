@@ -1,17 +1,29 @@
 from fastapi import FastAPI, Request, Form, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-import requests, json, os, shutil, tempfile
+from fastapi.staticfiles import StaticFiles
+
+import requests
+import json
+import os
+import shutil
+import tempfile
 import uvicorn
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+from pathlib import Path
 
+# === Setup FastAPI & Jinja2 ===
+app = FastAPI()
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+# === Globals ===
 APP_PASSWORD = os.getenv("APP_PASSWORD", "supersecret123")
 SESSIONS = set()
 HASH_FILE = "hashes.json"
 
-
+# === Helper functions ===
 def save_hash(entry):
     data = []
     if os.path.exists(HASH_FILE):
@@ -31,8 +43,9 @@ def check_auth(request: Request):
     token = request.cookies.get("token")
     if token not in SESSIONS:
         return RedirectResponse("/login", status_code=302)
-    return None  # Return None when authenticated
+    return None
 
+# === Routes ===
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return RedirectResponse("/login")
@@ -64,30 +77,29 @@ async def upload_file(request: Request, file: UploadFile = Form(...), user_hash:
     auth = check_auth(request)
     if auth is not None:
         return auth
-    
+
     try:
         server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10).json()
         server_url = server_resp["server"]
-        
-        # Use tempfile for better cross-platform compatibility
+
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
-        
+
         with open(temp_path, "rb") as f:
             response = requests.post(server_url, files={"file": (file.filename, f)}, data={"user": user_hash}, timeout=30)
-        
-        # Clean up temp file
+
         os.unlink(temp_path)
-        
+
         if response.status_code == 200:
             result = response.json()
             save_hash(result)
-        
+
     except Exception as e:
         print(f"Upload error: {e}")
-    
+
     return RedirectResponse("/dashboard", status_code=302)
 
+# === Entrypoint ===
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

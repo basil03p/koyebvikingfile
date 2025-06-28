@@ -1,12 +1,19 @@
 <!DOCTYPE html>
 <html>
-<head><title>Login</title></head>
+<head>
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
-<h2>Login</h2>
-{% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
-<form method="post">
-    <input type="password" name="password" placeholder="Enter password" required>
-    <button type="submit">Login</button>
-</form>
+    <div class="container">
+        <h2>Login</h2>
+        {% if error %}
+            <p style="color: #e74c3c;">{{ error }}</p>
+        {% endif %}
+        <form method="post">
+            <input type="password" name="password" placeholder="Enter password" required>
+            <input type="submit" value="Login">
+        </form>
+    </div>
 </body>
 </html>
