@@ -75,7 +75,7 @@ async def dashboard(request: Request):
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_file(request: Request, file: UploadFile = Form(...), user_hash: str = Form(...)):
     auth = check_auth(request)
-    if auth is not None:
+    if isinstance(auth, RedirectResponse):
         return auth
 
     try:
@@ -97,6 +97,47 @@ async def upload_file(request: Request, file: UploadFile = Form(...), user_hash:
 
     except Exception as e:
         print(f"Upload error: {e}")
+
+    return RedirectResponse("/dashboard", status_code=302)
+
+@app.post("/upload-remote", response_class=HTMLResponse)
+async def upload_remote_file(request: Request, file_url: str = Form(...), user_hash: str = Form(...)):
+    auth = check_auth(request)
+    if isinstance(auth, RedirectResponse):
+        return auth
+
+    try:
+        # Get VikingFile server
+        server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10).json()
+        server_url = server_resp["server"]
+
+        # Download the remote file
+        file_response = requests.get(file_url, timeout=30, stream=True)
+        file_response.raise_for_status()
+
+        # Extract filename from URL or use a default
+        filename = file_url.split("/")[-1] or "remote_file"
+        if "?" in filename:
+            filename = filename.split("?")[0]
+
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            for chunk in file_response.iter_content(chunk_size=8192):
+                temp_file.write(chunk)
+            temp_path = temp_file.name
+
+        # Upload to VikingFile
+        with open(temp_path, "rb") as f:
+            response = requests.post(server_url, files={"file": (filename, f)}, data={"user": user_hash}, timeout=30)
+
+        os.unlink(temp_path)
+
+        if response.status_code == 200:
+            result = response.json()
+            save_hash(result)
+
+    except Exception as e:
+        print(f"Remote upload error: {e}")
 
     return RedirectResponse("/dashboard", status_code=302)
 
