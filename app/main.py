@@ -129,7 +129,7 @@ async def upload_file(request: Request, file: UploadFile = Form(...), user_hash:
                         timeout=(10, 120)
                     )
                 response.raise_for_status()
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     save_hash(result)
@@ -138,7 +138,7 @@ async def upload_file(request: Request, file: UploadFile = Form(...), user_hash:
                     break
                 else:
                     print(f"Upload failed with status: {response.status_code}")
-                    
+
             except requests.exceptions.RequestException as e:
                 print(f"Upload attempt {attempt + 1} failed: {e}")
                 if attempt == 0:  # Try once more
@@ -198,15 +198,23 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
                     timeout=(10, 300)  # 5 minute timeout for remote uploads
                 )
                 upload_response.raise_for_status()
-                
+
                 if upload_response.status_code == 200:
-                    result = upload_response.json()
-                    
+                    try:
+                        result = upload_response.json()
+                    except json.JSONDecodeError as e:
+                        print(f"Failed to parse JSON response: {e}")
+                        print(f"Response content: {upload_response.text[:200]}...")
+                        if attempt < 2:
+                            continue
+                        else:
+                            break
+
                     # Check if the response contains an error
                     if "error" in result and result["error"] != "success":
                         print(f"VikingFile API error: {result.get('error', 'Unknown error')}")
                         break
-                    
+
                     # Save successful upload
                     if "hash" in result and "url" in result:
                         save_hash(result)
@@ -215,11 +223,11 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
                         break
                     else:
                         print(f"Unexpected response format: {result}")
-                        
+
                 else:
                     print(f"Upload failed with status: {upload_response.status_code}")
                     print(f"Response: {upload_response.text}")
-                    
+
             except requests.exceptions.Timeout as e:
                 print(f"Remote upload attempt {attempt + 1} timed out: {e}")
                 if attempt < 2:  # Try again unless it's the last attempt
@@ -304,10 +312,32 @@ async def upload_single_remote_file(file_url: str, user_hash: str, index: int, t
                     timeout=(10, 300)
                 )
                 upload_response.raise_for_status()
-                
+
                 if upload_response.status_code == 200:
-                    result = upload_response.json()
-                    
+                    try:
+                        result = upload_response.json()
+                    except json.JSONDecodeError as e:
+                        if attempt < 2:
+                            await manager.send_progress({
+                                "type": "progress",
+                                "index": index,
+                                "total": total,
+                                "url": file_url,
+                                "status": "retrying",
+                                "message": f"Invalid response, retry {attempt + 1}/3..."
+                            })
+                            continue
+                        else:
+                            await manager.send_progress({
+                                "type": "progress",
+                                "index": index,
+                                "total": total,
+                                "url": file_url,
+                                "status": "error",
+                                "message": f"Invalid JSON response: {str(e)}"
+                            })
+                            return False
+
                     # Check if the response contains an error
                     if "error" in result and result["error"] != "success":
                         await manager.send_progress({
@@ -319,7 +349,7 @@ async def upload_single_remote_file(file_url: str, user_hash: str, index: int, t
                             "message": f"API error: {result.get('error', 'Unknown error')}"
                         })
                         return False
-                    
+
                     # Save successful upload
                     if "hash" in result and "url" in result:
                         save_hash(result)
@@ -343,7 +373,7 @@ async def upload_single_remote_file(file_url: str, user_hash: str, index: int, t
                             "message": f"Unexpected response format"
                         })
                         return False
-                        
+
                 else:
                     if attempt < 2:
                         await manager.send_progress({
@@ -365,7 +395,7 @@ async def upload_single_remote_file(file_url: str, user_hash: str, index: int, t
                             "message": f"Upload failed with status: {upload_response.status_code}"
                         })
                         return False
-                    
+
             except requests.exceptions.Timeout as e:
                 if attempt < 2:
                     await manager.send_progress({
@@ -449,19 +479,19 @@ async def upload_bulk_remote_files(
     async def bulk_upload_task():
         # Small delay to ensure WebSocket connection is established
         await asyncio.sleep(0.5)
-        
+
         await manager.send_progress({
             "type": "bulk_start",
             "total": len(urls),
             "message": f"Starting bulk upload of {len(urls)} files..."
         })
-        
+
         successful = 0
         for i, url in enumerate(urls):
             result = await upload_single_remote_file(url, user_hash, i, len(urls))
             if result:
                 successful += 1
-        
+
         await manager.send_progress({
             "type": "bulk_complete",
             "total": len(urls),
