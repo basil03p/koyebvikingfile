@@ -1,14 +1,17 @@
+
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Login</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VikingFile Uploader - Login</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
-        <h2>Login</h2>
+        <h2>🛡️ VikingFile Uploader</h2>
         {% if error %}
-            <p style="color: #e74c3c;">{{ error }}</p>
+            <div class="error-message">{{ error }}</div>
         {% endif %}
         <form method="post">
             <input type="password" name="password" placeholder="Enter password" required>

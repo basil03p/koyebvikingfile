@@ -1,28 +1,51 @@
+
 <!DOCTYPE html>
-<html>
-<head><title>Dashboard</title></head>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VikingFile Uploader - Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
-<h2>Upload File to VikingFile</h2>
+    <div class="dashboard-container">
+        <h2>⚡ VikingFile Dashboard</h2>
+        
+        <div class="upload-section">
+            <h3>📁 Local File Upload</h3>
+            <form action="/upload" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" required>
+                <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
+                <button type="submit">🚀 Upload File</button>
+            </form>
+        </div>
 
-<h3>Local File Upload</h3>
-<form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" required>
-    <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
-    <button type="submit">Upload File</button>
-</form>
+        <div class="upload-section">
+            <h3>🌐 Remote Upload via URL</h3>
+            <form action="/upload-remote" method="post">
+                <input type="url" name="file_url" placeholder="Enter file URL (https://...)" required>
+                <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
+                <button type="submit">📥 Upload from URL</button>
+            </form>
+        </div>
 
-<h3>Remote Upload via URL</h3>
-<form action="/upload-remote" method="post">
-    <input type="url" name="file_url" placeholder="Enter file URL" required>
-    <input type="text" name="user_hash" placeholder="Your Viking user hash" required>
-    <button type="submit">Upload from URL</button>
-</form>
-
-<h3>Your uploaded files:</h3>
-<ul>
-{% for f in hashes %}
-    <li><a href="{{ f.url }}">{{ f.name }}</a> ({{ f.size }} bytes)</li>
-{% endfor %}
-</ul>
+        <div class="files-section">
+            <h3>📋 Your Uploaded Files</h3>
+            {% if hashes %}
+                <ul>
+                {% for f in hashes %}
+                    <li>
+                        <a href="{{ f.url }}" target="_blank">{{ f.name }}</a>
+                        <span class="file-size">({{ f.size }} bytes)</span>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p style="color: rgba(255, 255, 255, 0.6); text-align: center; padding: 2rem;">
+                    No files uploaded yet. Start by uploading your first file! 🎯
+                </p>
+            {% endif %}
+        </div>
+    </div>
 </body>
 </html>
