@@ -447,6 +447,9 @@ async def upload_bulk_remote_files(
 
     # Start bulk upload in background
     async def bulk_upload_task():
+        # Small delay to ensure WebSocket connection is established
+        await asyncio.sleep(0.5)
+        
         await manager.send_progress({
             "type": "bulk_start",
             "total": len(urls),
