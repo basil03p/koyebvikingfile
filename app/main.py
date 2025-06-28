@@ -78,25 +78,61 @@ async def upload_file(request: Request, file: UploadFile = Form(...), user_hash:
     if isinstance(auth, RedirectResponse):
         return auth
 
+    temp_path = None
     try:
-        server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10).json()
-        server_url = server_resp["server"]
+        # Get VikingFile server
+        try:
+            server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10)
+            server_resp.raise_for_status()
+            server_url = server_resp.json()["server"]
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to get VikingFile server: {e}")
+            return RedirectResponse("/dashboard", status_code=302)
 
+        # Save uploaded file to temp location
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
+            shutil.copyfileobj(file.file, temp_file)
 
-        with open(temp_path, "rb") as f:
-            response = requests.post(server_url, files={"file": (file.filename, f)}, data={"user": user_hash}, timeout=30)
+        # Upload to VikingFile with retry
+        upload_success = False
+        for attempt in range(2):
+            try:
+                with open(temp_path, "rb") as f:
+                    response = requests.post(
+                        server_url, 
+                        files={"file": (file.filename, f)}, 
+                        data={"user": user_hash}, 
+                        timeout=(10, 120)
+                    )
+                response.raise_for_status()
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    save_hash(result)
+                    upload_success = True
+                    print(f"Upload successful: {file.filename}")
+                    break
+                else:
+                    print(f"Upload failed with status: {response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Upload attempt {attempt + 1} failed: {e}")
+                if attempt == 0:  # Try once more
+                    continue
 
-        os.unlink(temp_path)
-
-        if response.status_code == 200:
-            result = response.json()
-            save_hash(result)
+        if not upload_success:
+            print("Upload to VikingFile failed after retries")
 
     except Exception as e:
         print(f"Upload error: {e}")
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                print(f"Failed to delete temp file: {e}")
 
     return RedirectResponse("/dashboard", status_code=302)
 
@@ -106,38 +142,124 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
     if isinstance(auth, RedirectResponse):
         return auth
 
+    temp_path = None
     try:
-        # Get VikingFile server
-        server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10).json()
-        server_url = server_resp["server"]
+        # Get VikingFile server with retry
+        try:
+            server_resp = requests.get("https://vikingfile.com/api/get-server", timeout=10)
+            server_resp.raise_for_status()
+            server_url = server_resp.json()["server"]
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to get VikingFile server: {e}")
+            return RedirectResponse("/dashboard", status_code=302)
 
-        # Download the remote file
-        file_response = requests.get(file_url, timeout=30, stream=True)
-        file_response.raise_for_status()
+        # Download the remote file with multiple attempts and proper headers
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"Downloading from {file_url} (attempt {attempt + 1}/{max_retries})")
+                file_response = session.get(
+                    file_url, 
+                    timeout=(10, 60),  # (connect_timeout, read_timeout)
+                    stream=True,
+                    allow_redirects=True
+                )
+                file_response.raise_for_status()
+                break
+            except requests.exceptions.Timeout as e:
+                print(f"Timeout on attempt {attempt + 1}: {e}")
+                if attempt == max_retries - 1:
+                    print("All download attempts failed due to timeout")
+                    return RedirectResponse("/dashboard", status_code=302)
+            except requests.exceptions.RequestException as e:
+                print(f"Request failed on attempt {attempt + 1}: {e}")
+                if attempt == max_retries - 1:
+                    print("All download attempts failed")
+                    return RedirectResponse("/dashboard", status_code=302)
 
         # Extract filename from URL or use a default
-        filename = file_url.split("/")[-1] or "remote_file"
-        if "?" in filename:
-            filename = filename.split("?")[0]
+        filename = file_url.split("/")[-1].split("?")[0] or "remote_file"
+        if not filename or filename == "":
+            filename = "remote_file"
 
-        # Save to temporary file
+        # Ensure filename has an extension if possible
+        content_type = file_response.headers.get('content-type', '')
+        if '.' not in filename and content_type:
+            if 'image/jpeg' in content_type or 'image/jpg' in content_type:
+                filename += '.jpg'
+            elif 'image/png' in content_type:
+                filename += '.png'
+            elif 'image/gif' in content_type:
+                filename += '.gif'
+            elif 'video/mp4' in content_type:
+                filename += '.mp4'
+            elif 'application/pdf' in content_type:
+                filename += '.pdf'
+
+        # Check file size
+        content_length = file_response.headers.get('content-length')
+        if content_length and int(content_length) > 500 * 1024 * 1024:  # 500MB limit
+            print(f"File too large: {content_length} bytes")
+            return RedirectResponse("/dashboard", status_code=302)
+
+        # Save to temporary file with progress tracking
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            for chunk in file_response.iter_content(chunk_size=8192):
-                temp_file.write(chunk)
             temp_path = temp_file.name
+            downloaded = 0
+            for chunk in file_response.iter_content(chunk_size=8192):
+                if chunk:
+                    temp_file.write(chunk)
+                    downloaded += len(chunk)
+                    # Optional: print progress for large files
+                    if downloaded % (1024 * 1024) == 0:  # Every MB
+                        print(f"Downloaded {downloaded // (1024 * 1024)}MB")
 
-        # Upload to VikingFile
-        with open(temp_path, "rb") as f:
-            response = requests.post(server_url, files={"file": (filename, f)}, data={"user": user_hash}, timeout=30)
+        print(f"Download completed: {downloaded} bytes")
 
-        os.unlink(temp_path)
+        # Upload to VikingFile with retry
+        upload_success = False
+        for attempt in range(2):
+            try:
+                with open(temp_path, "rb") as f:
+                    upload_response = requests.post(
+                        server_url, 
+                        files={"file": (filename, f)}, 
+                        data={"user": user_hash}, 
+                        timeout=(10, 120)  # Longer timeout for upload
+                    )
+                upload_response.raise_for_status()
+                
+                if upload_response.status_code == 200:
+                    result = upload_response.json()
+                    save_hash(result)
+                    upload_success = True
+                    print(f"Upload successful: {filename}")
+                    break
+                else:
+                    print(f"Upload failed with status: {upload_response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Upload attempt {attempt + 1} failed: {e}")
+                if attempt == 0:  # Try once more
+                    continue
 
-        if response.status_code == 200:
-            result = response.json()
-            save_hash(result)
+        if not upload_success:
+            print("Upload to VikingFile failed after retries")
 
     except Exception as e:
         print(f"Remote upload error: {e}")
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                print(f"Failed to delete temp file: {e}")
 
     return RedirectResponse("/dashboard", status_code=302)
 
