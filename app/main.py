@@ -201,7 +201,29 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
 
                 if upload_response.status_code == 200:
                     try:
-                        result = upload_response.json()
+                        # Try to parse JSON from response
+                        response_text = upload_response.text.strip()
+                        
+                        # Check if response starts with JSON
+                        if response_text.startswith('{'):
+                            # Find the end of the first JSON object
+                            brace_count = 0
+                            json_end = 0
+                            for i, char in enumerate(response_text):
+                                if char == '{':
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        json_end = i + 1
+                                        break
+                            
+                            # Parse only the JSON part
+                            json_part = response_text[:json_end]
+                            result = json.loads(json_part)
+                        else:
+                            result = upload_response.json()
+                            
                     except json.JSONDecodeError as e:
                         print(f"Failed to parse JSON response: {e}")
                         print(f"Response content: {upload_response.text[:200]}...")
@@ -220,6 +242,7 @@ async def upload_remote_file(request: Request, file_url: str = Form(...), user_h
                         save_hash(result)
                         upload_success = True
                         print(f"Remote upload successful: {result.get('name', filename)}")
+                        print(f"Upload result: {result}")
                         break
                     else:
                         print(f"Unexpected response format: {result}")
@@ -315,7 +338,29 @@ async def upload_single_remote_file(file_url: str, user_hash: str, index: int, t
 
                 if upload_response.status_code == 200:
                     try:
-                        result = upload_response.json()
+                        # Try to parse JSON from response
+                        response_text = upload_response.text.strip()
+                        
+                        # Check if response starts with JSON
+                        if response_text.startswith('{'):
+                            # Find the end of the first JSON object
+                            brace_count = 0
+                            json_end = 0
+                            for i, char in enumerate(response_text):
+                                if char == '{':
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        json_end = i + 1
+                                        break
+                            
+                            # Parse only the JSON part
+                            json_part = response_text[:json_end]
+                            result = json.loads(json_part)
+                        else:
+                            result = upload_response.json()
+                            
                     except json.JSONDecodeError as e:
                         if attempt < 2:
                             await manager.send_progress({
